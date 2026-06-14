@@ -1,0 +1,2 @@
+ALTER TABLE perfiles
+  ADD COLUMN IF NOT EXISTS xp_tour_completed boolean NOT NULL DEFAULT FALSE;
