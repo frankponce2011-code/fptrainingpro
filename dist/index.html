@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>FPTrainingPro</title>
+
+    <meta property="og:title" content="FPTrainingPro" />
+    <meta property="og:description" content="Aplicativo Integral de Entrenamiento" />
+    <meta property="og:image" content="https://twsmiqxywmsskxbejykb.supabase.co/storage/v1/object/public/avatars/LogoActual.jpg" />
+    <meta property="og:url" content="https://fptrainingpro.bolt.host" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="FPTrainingPro" />
+    <meta name="twitter:description" content="Aplicativo Integral de Entrenamiento" />
+    <meta name="twitter:image" content="https://twsmiqxywmsskxbejykb.supabase.co/storage/v1/object/public/avatars/LogoActual.jpg" />
+
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#030712" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FPTrainingPro" />
+    <link rel="apple-touch-icon" href="https://twsmiqxywmsskxbejykb.supabase.co/storage/v1/object/public/avatars/LogoActual.jpg" />
+
+    <link rel="icon" href="https://twsmiqxywmsskxbejykb.supabase.co/storage/v1/object/public/avatars/LogoActual.jpg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="https://twsmiqxywmsskxbejykb.supabase.co/storage/v1/object/public/avatars/LogoActual.jpg" />
+    <link rel="icon" type="image/png" sizes="512x512" href="https://twsmiqxywmsskxbejykb.supabase.co/storage/v1/object/public/avatars/LogoActual.jpg" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="/assets/index-CW2gNOe0.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BR-qU-Tw.css">
+  </head>
+  <body class="bg-gray-950">
+    <div id="root"></div>
+    
+    
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then(reg => {
+            // Fuerza al navegador a verificar si subiste cambios en Bolt
+            reg.update();
+            
+            // Si detecta un cambio en el código, refresca en segundo plano de inmediato
+            reg.onupdatefound = () => {
+              const installingWorker = reg.installing;
+              if (installingWorker) {
+                installingWorker.onstatechange = () => {
+                  if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    console.log('¡Nueva versión detectada! Recargando app...');
+                    window.location.reload();
+                  }
+                };
+              }
+            };
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
