@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { ArrowLeft, Check, Dumbbell, Clock } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, Check, Dumbbell, Clock, Loader2, CheckCircle } from 'lucide-react';
 import { PlantillaEjercicio, Ejercicio, TipoSerie } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { ExerciseImg } from '../lib/ExerciseImg';
 
 type Props = {
@@ -9,6 +11,7 @@ type Props = {
   showRegistro?: boolean;
   siblings?: PlantillaEjercicio[];
   onSelectSibling?: (ej: PlantillaEjercicio) => void;
+  rutinaId?: string;
 };
 
 const tipoColors: Record<TipoSerie, string> = {
@@ -141,7 +144,8 @@ function AltEjercicioDetail({ ejercicio, onBack }: { ejercicio: Ejercicio; onBac
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function EjercicioDetail({ ejercicioConfig, onBack, showRegistro = false, siblings, onSelectSibling }: Props) {
+export default function EjercicioDetail({ ejercicioConfig, onBack, showRegistro = false, siblings, onSelectSibling, rutinaId }: Props) {
+  const { profile } = useAuth();
   const ejercicio = ejercicioConfig.ejercicio!;
   const alt = ejercicioConfig.ejercicio_alternativo;
   const tipo = ejercicioConfig.tipo as TipoSerie;
@@ -149,6 +153,60 @@ export default function EjercicioDetail({ ejercicioConfig, onBack, showRegistro 
   const numSeries = ejercicioConfig.series ?? 3;
   const [series, setSeries] = useState<SerieRow[]>(() => loadSeries(ejercicio.id, numSeries));
   const [showAlt, setShowAlt] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
+ useEffect(() => {
+    async function cargarRegistro() {
+      if (!profile?.id || !rutinaId) return;
+
+      // 1. Intentar cargar el registro de HOY
+      const { data: hoy } = await supabase
+        .from('registro_ejercicios')
+        .select('detalle_series, fecha')
+        .eq('alumno_id', profile.id)
+        .eq('rutina_id', rutinaId)
+        .eq('ejercicio_id', ejercicio.id)
+        .eq('fecha', todayStr())
+        .maybeSingle();
+
+      if (hoy?.detalle_series) {
+        setSeries(
+          hoy.detalle_series.map((s: { serie: number; peso: number | null; descanso: number | null; completada: boolean }) => ({
+            serie: s.serie,
+            peso: s.peso != null ? String(s.peso) : '',
+            descanso: s.descanso != null ? String(s.descanso) : '',
+            completada: !!s.completada,
+          }))
+        );
+        return;
+      }
+
+      // 2. Si no hay registro de hoy, cargar el más reciente
+      const { data: reciente } = await supabase
+        .from('registro_ejercicios')
+        .select('detalle_series, fecha')
+        .eq('alumno_id', profile.id)
+        .eq('rutina_id', rutinaId)
+        .eq('ejercicio_id', ejercicio.id)
+        .order('fecha', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (reciente?.detalle_series) {
+        setSeries(
+          reciente.detalle_series.map((s: { serie: number; peso: number | null; descanso: number | null; completada: boolean }) => ({
+            serie: s.serie,
+            peso: s.peso != null ? String(s.peso) : '',
+            descanso: s.descanso != null ? String(s.descanso) : '',
+            completada: false, // nuevo día = sin completar
+          }))
+        );
+      }
+    }
+
+    cargarRegistro();
+  }, [profile?.id, rutinaId, ejercicio.id]);
 
   if (showAlt && alt) {
     return <AltEjercicioDetail ejercicio={alt} onBack={() => setShowAlt(false)} />;
@@ -160,6 +218,45 @@ export default function EjercicioDetail({ ejercicioConfig, onBack, showRegistro 
       saveSeries(ejercicio.id, ejercicio.nombre, next);
       return next;
     });
+  }
+
+  async function guardarRegistro() {
+    if (!profile || !rutinaId || saving) return;
+    setSaving(true);
+    setSaved(false);
+    setSaveError('');
+
+    try {
+      const detalle = series.map(s => ({
+        serie: s.serie,
+        peso: s.peso !== '' ? parseFloat(s.peso) : null,
+        descanso: s.descanso !== '' ? parseInt(s.descanso) : null,
+        completada: s.completada,
+      }));
+
+      const { error } = await supabase
+        .from('registro_ejercicios')
+        .upsert(
+          {
+            alumno_id: profile.id,
+            rutina_id: rutinaId,
+            ejercicio_id: ejercicio.id,
+            fecha: todayStr(),
+            series_completadas: series.filter(s => s.completada).length,
+            detalle_series: detalle,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'alumno_id,rutina_id,ejercicio_id,fecha' },
+        );
+
+      if (error) throw error;
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : 'Error al guardar el progreso');
+    } finally {
+      setSaving(false);
+    }
   }
 
   const completadas = series.filter(s => s.completada).length;
@@ -459,6 +556,34 @@ export default function EjercicioDetail({ ejercicioConfig, onBack, showRegistro 
                   />
                 </div>
               </div>
+
+              {/* Guardar progreso */}
+              {rutinaId && (
+                <div className="mt-4 space-y-2">
+                  {saveError && (
+                    <div className="px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
+                      <p className="text-xs text-red-400">{saveError}</p>
+                    </div>
+                  )}
+                  <button
+                    onClick={guardarRegistro}
+                    disabled={saving}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                    style={{
+                      backgroundColor: saved ? '#22c55e' : '#facc15',
+                      color: '#111827',
+                    }}
+                  >
+                    {saving ? (
+                      <><Loader2 size={16} className="animate-spin" /> Guardando...</>
+                    ) : saved ? (
+                      <><CheckCircle size={16} /> Progreso guardado</>
+                    ) : (
+                      'Guardar progreso'
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -466,3 +591,5 @@ export default function EjercicioDetail({ ejercicioConfig, onBack, showRegistro 
     </div>
   );
 }
+
+

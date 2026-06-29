@@ -9,13 +9,13 @@ type AuthContextType = {
   loading: boolean;
   initialized: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signInWithGoogle: () => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string) => Promise<{ error: Error | null; isNew: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
 async function logIngreso(userId: string, profile: Profile | null, email: string) {
   try {
     const { error } = await supabase.from('registro_ingresos').insert({
@@ -23,6 +23,7 @@ async function logIngreso(userId: string, profile: Profile | null, email: string
       nombre_completo: profile ? `${profile.nombre} ${profile.apellido}`.trim() : '',
       correo: email,
       rol: profile?.rol || '',
+      fecha_ingreso: new Date().toISOString(), // opcional si tu tabla ya lo pone por defecto
     });
     if (error) {
       console.warn('[AUTH] logIngreso non-critical error:', error.code, error.message);
@@ -32,33 +33,6 @@ async function logIngreso(userId: string, profile: Profile | null, email: string
   }
 }
 
-async function fetchProfileFromDB(userId: string): Promise<Profile | null> {
-  console.log('[AUTH] Fetching profile for user:', userId);
-  const { data, error } = await supabase
-    .from('perfiles')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('[AUTH] fetchProfile Supabase error:', {
-      code: error.code,
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-    });
-    return null;
-  }
-
-  if (!data) {
-    console.warn('[AUTH] fetchProfile: no profile found for user', userId);
-    return null;
-  }
-
-  console.log('[AUTH] Profile loaded:', data.rol);
-  return data as Profile;
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -66,152 +40,141 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
 
-  async function fetchProfile(userId: string): Promise<Profile | null> {
-    const p = await fetchProfileFromDB(userId);
-    setProfile(p);
-    return p;
-  }
+  async function loadUserWithProfile(s: Session | null): Promise<Profile | null> {
+    if (!s?.user) {
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      return null;
+    }
 
-  async function refreshProfile() {
-    if (user) await fetchProfile(user.id);
+    const email = s.user.email;
+
+    // 1. Buscar perfil por ID de Auth
+    let { data: p } = await supabase
+      .from('perfiles')
+      .select('*')
+      .eq('id', s.user.id)
+      .maybeSingle();
+
+    // 2. Si no existe por ID y es Google, buscar por correo para vincular
+    if (!p && s.user.app_metadata?.provider === 'google' && email) {
+      const { data: existingProfile } = await supabase
+        .from('perfiles')
+        .select('*')
+        .eq('correo', email)
+        .maybeSingle();
+
+      if (existingProfile) {
+        // Vincular ID de Google al perfil existente
+        await supabase
+          .from('perfiles')
+          .update({ id: s.user.id })
+          .eq('id', existingProfile.id);
+        p = { ...existingProfile, id: s.user.id };
+      } else {
+        // Crear nuevo perfil para usuario de Google
+        const nameParts = (s.user.user_metadata?.full_name || 'Usuario').split(' ');
+        const { data: newP } = await supabase
+          .from('perfiles')
+          .insert({
+            id: s.user.id,
+            nombre: nameParts[0],
+            apellido: nameParts.slice(1).join(' ') || '',
+            correo: email,
+            rol: 'alumno',
+            estado: 'activo',
+          })
+          .select()
+          .single();
+        p = newP;
+      }
+    }
+
+    setSession(s);
+    setUser(s.user);
+    setProfile(p as Profile | null);
+    return p as Profile | null;
   }
 
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      console.warn('[AUTH] Init timeout reached — forcing ready state');
+    let ignoreAuthChange = false;
+
+    // Cargar sesión inicial
+    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+      const p = await loadUserWithProfile(s);
+      if (s?.user) {
+        await logIngreso(s.user.id, p, s.user.email || '');
+      }
       setLoading(false);
       setInitialized(true);
-    }, 8000);
+      ignoreAuthChange = false;
+    });
 
-    supabase.auth.getSession().then(async ({ data: { session: s }, error }) => {
-      clearTimeout(timeout);
+    // Escuchar cambios de sesión POSTERIORES
+    // Ignorar el INITIAL_SESSION porque ya lo manejamos arriba
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
+      if (event === 'INITIAL_SESSION') return;
+      if (ignoreAuthChange) return;
 
-      if (error) {
-        console.error('[AUTH] getSession error:', error.message);
-        setLoading(false);
-        setInitialized(true);
-        return;
-      }
+      console.log('[AUTH] onAuthStateChange event:', event);
 
-      if (s?.user) {
-        const p = await fetchProfileFromDB(s.user.id);
-        if (!p) {
-          console.warn('[AUTH] No profile found on session restore — signing out user', s.user.email);
-          await supabase.auth.signOut();
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-        } else {
-          setSession(s);
-          setUser(s.user);
-          setProfile(p);
-        }
-      } else {
+      if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
         setProfile(null);
+        return;
       }
 
-      setLoading(false);
-      setInitialized(true);
-    }).catch((err) => {
-      clearTimeout(timeout);
-      console.error('[AUTH] getSession exception:', err);
-      setLoading(false);
-      setInitialized(true);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
-      if (event === 'INITIAL_SESSION') return;
-
-      console.log('[AUTH] onAuthStateChange event:', event, s?.user?.email ?? 'no user');
-
-      setSession(s);
-      setUser(s?.user ?? null);
-
-      if (s?.user) {
-        const { data, error } = await supabase
-          .from('perfiles')
-          .select('*')
-          .eq('id', s.user.id)
-          .maybeSingle();
-
-        if (error) {
-          console.error('[AUTH] onAuthStateChange profile error:', {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint,
-          });
-        }
-
-        setProfile(data as Profile | null);
-      } else {
-        setProfile(null);
-      }
-
-      setLoading(false);
+      await loadUserWithProfile(s);
     });
 
     return () => {
-      clearTimeout(timeout);
+      ignoreAuthChange = true;
       subscription.unsubscribe();
     };
   }, []);
 
-  async function signIn(email: string, password: string): Promise<{ error: Error | null }> {
-    console.log('[AUTH] signIn attempt:', email);
-
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      console.error('[AUTH] signInWithPassword error:', {
-        status: error.status,
-        code: (error as { code?: string }).code,
-        message: error.message,
-        name: error.name,
-      });
-      return { error: error as Error };
-    }
-
-    console.log('[AUTH] signIn success, user id:', data.user?.id);
-
-    if (data.user) {
-      const p = await fetchProfile(data.user.id);
-      if (!p) {
-        console.error('[AUTH] signIn: auth OK but NO PROFILE found in table "perfiles" for user id:', data.user.id, '| email:', email);
-        await supabase.auth.signOut();
-        return {
-          error: new Error(
-            `AUTH_OK_NO_PROFILE::La autenticacion fue exitosa pero no se encontro un perfil en la tabla "perfiles" para este usuario (${email}). Contacta al administrador.`
-          ),
-        };
-      }
-      await logIngreso(data.user.id, p, email);
-    }
-
-    return { error: null };
+  async function refreshProfile() {
+    if (session) await loadUserWithProfile(session);
   }
 
-  async function signUp(email: string, password: string): Promise<{ error: Error | null; isNew: boolean }> {
-    console.log('[AUTH] signUp attempt:', email);
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) {
-      console.error('[AUTH] signUp error:', error.message);
-      return { error: error as Error, isNew: false };
+  async function signIn(email: string, password: string) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (!error && data.session) {
+    const p = await loadUserWithProfile(data.session);
+    if (data.user) {
+      await logIngreso(data.user.id, p, email); // ← aquí se registra el ingreso
     }
-    const isNew = (data.user?.identities?.length ?? 0) > 0;
-    return { error: null, isNew };
+  }
+  return { error: error as Error | null };
+}
+
+  async function signInWithGoogle() {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+    return { error: error as Error | null };
+  }
+
+  async function signUp(email: string, password: string) {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    return { error: error as Error | null, isNew: !!data.user };
   }
 
   async function signOut() {
-    console.log('[AUTH] signOut');
     await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
     setProfile(null);
   }
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, initialized, signIn, signUp, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{
+      session, user, profile, loading, initialized,
+      signIn, signInWithGoogle, signUp, signOut, refreshProfile,
+    }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-  Users, LogOut, Edit3, Shield, Activity, Apple, Dumbbell,
-  Calculator, BookOpen, CheckCircle2, Search, Plus, Trash2,
-  ArrowLeft, Save, Camera, X, User, Newspaper,
+  Users, LogOut, Edit3, Activity, Apple, Dumbbell,
+  BookOpen, CheckCircle2, User,
+  Plus, Trash2, Search, ArrowLeft, X, Save, Camera,
+  Shield, Newspaper,
 } from 'lucide-react';
 import { supabase, Profile, PlantillaRutina } from '../lib/supabase';
 import { createUser, deleteUser as deleteUserApi } from '../lib/api';
@@ -15,9 +16,9 @@ import DietaDetail from './DietaDetail';
 import PlantillaList from './PlantillaList';
 import PlantillaBuilder from './PlantillaBuilder';
 import AsignarRutina from './AsignarRutina';
-import NotificationBell from '../lib/NotificationBell';
-import XpRankingWidget from './XpRankingWidget';
 import FitnessContent from './FitnessContent';
+import NotificationBell from '../lib/NotificationBell';
+import AIChatModal from './AIChatModal';
 
 type View = 'home' | 'users' | 'eval-select' | 'eval-history' |
   'dieta-select' |
@@ -28,7 +29,7 @@ export default function TrainerDashboard() {
   const { profile: trainerProfile, signOut, refreshProfile } = useAuth();
   const [view, setView] = useState<View>('home');
   const [editingProfile, setEditingProfile] = useState(false);
-  const [users, setUsers] = useState<Profile[]>([]);
+  const [students, setStudents] = useState<Profile[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedAlumno, setSelectedAlumno] = useState<Profile | null>(null);
@@ -43,15 +44,14 @@ export default function TrainerDashboard() {
   const [formEstatura, setFormEstatura] = useState('');
   const [formSexo, setFormSexo] = useState('masculino');
   const [formEmail, setFormEmail] = useState('');
-  const [formPassword, setFormPassword] = useState('');
   const [formFoto, setFormFoto] = useState<File | null>(null);
   const [formFotoPreview, setFormFotoPreview] = useState<string | null>(null);
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState(false);
 
-  async function loadMyAlumnos() {
-    if (!trainerProfile?.id) return;
+  const loadStudents = useCallback(async () => {
+    if (!trainerProfile) return;
     setLoadingData(true);
     const { data } = await supabase
       .from('perfiles')
@@ -59,17 +59,16 @@ export default function TrainerDashboard() {
       .eq('rol', 'alumno')
       .eq('entrenador_id', trainerProfile.id)
       .order('created_at', { ascending: false });
-    setUsers(data || []);
+    setStudents(data || []);
     setLoadingData(false);
-  }
+  }, [trainerProfile]);
 
   useEffect(() => {
     if (view === 'users' || view === 'eval-select' || view === 'dieta-select') {
-      loadMyAlumnos();
+      loadStudents();
     }
-  }, [view, trainerProfile?.id]);
+  }, [view, loadStudents]);
 
-  // ── Early returns after all hooks ──
   if (editingProfile) return <ProfileSetupPage isEditing onDone={() => { setEditingProfile(false); refreshProfile(); }} />;
   if (view === 'macros') return <MacroCalculator onClose={() => setView('home')} />;
   if (view === 'exercises') return <ExerciseLibrary onClose={() => setView('home')} />;
@@ -108,12 +107,12 @@ export default function TrainerDashboard() {
     if (error) { setDeleteError(error); return; }
     setDeleteTarget(null);
     setView('users');
-    loadMyAlumnos();
+    loadStudents();
   }
 
   function openAddUser() {
     setFormNombre(''); setFormApellido(''); setFormEdad(''); setFormEstatura('');
-    setFormSexo('masculino'); setFormEmail(''); setFormPassword('');
+    setFormSexo('masculino'); setFormEmail('');
     setFormFoto(null); setFormFotoPreview(null); setFormError(''); setFormSuccess(false);
     setView('add-user');
   }
@@ -123,7 +122,7 @@ export default function TrainerDashboard() {
     setFormEdad(p.edad?.toString() || '');
     setFormEstatura(p.estatura?.toString() || '');
     setFormSexo(p.sexo || 'masculino');
-    setFormEmail(''); setFormPassword('');
+    setFormEmail('');
     setFormFoto(null); setFormFotoPreview(p.foto_url || null);
     setFormError(''); setFormSuccess(false);
     setSelectedAlumno(p);
@@ -134,9 +133,7 @@ export default function TrainerDashboard() {
     setFormError(''); setFormSaving(true);
     try {
       if (!formNombre.trim() || !formApellido.trim()) throw new Error('Nombre y apellido son obligatorios');
-
       let foto_url = formFotoPreview || '';
-
       if (isEdit && selectedAlumno) {
         if (formFoto) foto_url = await uploadFoto(formFoto, selectedAlumno.id);
         const { error } = await supabase.from('perfiles').update({
@@ -147,12 +144,11 @@ export default function TrainerDashboard() {
         }).eq('id', selectedAlumno.id);
         if (error) throw error;
       } else {
-        if (!formEmail.trim() || !formPassword) throw new Error('Correo y contrasena son obligatorios');
-
-        // Upload foto to temp path, will be re-uploaded with real ID via edge function
+        if (!formEmail.trim()) throw new Error('El correo electrónico es obligatorio');
+        const defaultPassword = 'Fp123456';
         const { error: createError } = await createUser({
           email: formEmail.trim(),
-          password: formPassword,
+          password: defaultPassword,
           nombre: formNombre.trim(),
           apellido: formApellido.trim(),
           edad: formEdad || undefined,
@@ -160,11 +156,10 @@ export default function TrainerDashboard() {
           sexo: formSexo,
           rol: 'alumno',
           foto_url: foto_url || undefined,
-          entrenador_id: trainerProfile!.id,
+          entrenador_id: trainerProfile?.id || null,
         });
         if (createError) throw new Error(createError);
       }
-
       setFormSuccess(true);
       setTimeout(() => { setFormSuccess(false); setView('users'); }, 800);
     } catch (err: unknown) {
@@ -176,41 +171,35 @@ export default function TrainerDashboard() {
 
   const displayName = `${trainerProfile?.nombre || ''} ${trainerProfile?.apellido || ''}`.trim();
   const initials = `${trainerProfile?.nombre?.[0] || ''}${trainerProfile?.apellido?.[0] || ''}`.toUpperCase();
-  const filteredUsers = users.filter(p =>
+  const filteredStudents = students.filter(p =>
     `${p.nombre} ${p.apellido}`.toLowerCase().includes(search.toLowerCase())
   );
 
   const menuItems = [
+    { key: 'users', icon: Users, label: 'Mis Alumnos', color: 'from-blue-600 to-blue-700' },
     { key: 'eval-select', icon: Activity, label: 'Evaluaciones', color: 'from-cyan-600 to-cyan-700' },
     { key: 'dieta-select', icon: Apple, label: 'Enviar Dietas', color: 'from-green-600 to-green-700' },
-    { key: 'users', icon: Users, label: 'Mis Alumnos', color: 'from-blue-600 to-blue-700' },
     { key: 'rutinas', icon: Dumbbell, label: 'Crear Rutinas', color: 'from-red-600 to-red-700' },
     { key: 'assign-rutinas', icon: CheckCircle2, label: 'Asignar Rutinas', color: 'from-yellow-600 to-yellow-700' },
-    { key: 'macros', icon: Calculator, label: 'Calculadora de Macros', color: 'from-orange-600 to-orange-700' },
     { key: 'exercises', icon: BookOpen, label: 'Biblioteca de Ejercicios', color: 'from-purple-600 to-purple-700' },
     { key: 'fitness', icon: Newspaper, label: 'Contenido Fitness', color: 'from-teal-600 to-teal-700' },
   ];
 
-  // ── Add/Edit User Form ──
   if (view === 'add-user' || view === 'edit-user') {
     const isEdit = view === 'edit-user';
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col max-w-lg mx-auto">
         <header className="bg-gray-900 border-b border-gray-800 px-4 py-4 sticky top-0 z-10">
           <div className="flex items-center gap-3">
-            <button onClick={() => setView(isEdit ? 'users' : 'home')} className="text-gray-400 hover:text-white transition-colors">
+            <button onClick={() => setView('users')} className="text-gray-400 hover:text-white transition-colors">
               <ArrowLeft size={20} />
             </button>
             <h2 className="text-sm font-bold text-white">{isEdit ? 'Editar' : 'Agregar'} Alumno</h2>
           </div>
         </header>
         <main className="flex-1 px-4 py-4 pb-28 overflow-y-auto">
-          {formError && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-lg p-3 mb-4">{formError}</div>
-          )}
-          {formSuccess && (
-            <div className="bg-green-500/10 border border-green-500/30 text-green-400 text-sm rounded-lg p-3 mb-4">Alumno guardado correctamente</div>
-          )}
+          {formError && <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-lg p-3 mb-4">{formError}</div>}
+          {formSuccess && <div className="bg-green-500/10 border border-green-500/30 text-green-400 text-sm rounded-lg p-3 mb-4">Guardado correctamente</div>}
           <div className="flex items-center gap-3 mb-5">
             <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-800 border border-gray-700 flex items-center justify-center shrink-0">
               {formFotoPreview
@@ -218,7 +207,7 @@ export default function TrainerDashboard() {
                 : <User size={24} className="text-gray-600" />}
             </div>
             <label className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-700 border-dashed rounded-lg text-sm text-gray-400 hover:text-white hover:border-gray-500 cursor-pointer transition-colors">
-              <Camera size={16} /> Foto de perfil (opcional)
+              <Camera size={16} /> Foto (opcional)
               <input type="file" accept="image/*" onChange={e => {
                 const f = e.target.files?.[0];
                 if (f) { setFormFoto(f); setFormFotoPreview(URL.createObjectURL(f)); }
@@ -233,22 +222,22 @@ export default function TrainerDashboard() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1">Nombre <span className="text-red-400">*</span></label>
-                <input value={formNombre} onChange={e => setFormNombre(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Nombre</label>
+                <input value={formNombre} onChange={e => setFormNombre(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1">Apellido <span className="text-red-400">*</span></label>
-                <input value={formApellido} onChange={e => setFormApellido(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Apellido</label>
+                <input value={formApellido} onChange={e => setFormApellido(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-gray-400 mb-1">Edad</label>
-                <input type="number" value={formEdad} onChange={e => setFormEdad(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
+                <input type="number" value={formEdad} onChange={e => setFormEdad(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-400 mb-1">Estatura (cm)</label>
-                <input type="number" step="0.1" value={formEstatura} onChange={e => setFormEstatura(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
+                <input type="number" step="0.1" value={formEstatura} onChange={e => setFormEstatura(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
               </div>
             </div>
             <div>
@@ -256,38 +245,31 @@ export default function TrainerDashboard() {
               <div className="flex gap-2">
                 {['masculino', 'femenino'].map(s => (
                   <button key={s} type="button" onClick={() => setFormSexo(s)}
-                    className={`flex-1 py-2.5 rounded-lg text-sm font-semibold capitalize transition-colors ${formSexo === s ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-500'}`}>
+                    className={`flex-1 py-2.5 rounded-lg text-sm font-semibold capitalize transition-colors ${formSexo === s ? 'bg-yellow-400 text-gray-900' : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-500'}`}>
                     {s === 'masculino' ? 'Masculino' : 'Femenino'}
                   </button>
                 ))}
               </div>
             </div>
             {!isEdit && (
-              <>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Correo <span className="text-red-400">*</span></label>
-                  <input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Contrasena <span className="text-red-400">*</span></label>
-                  <input type="password" value={formPassword} onChange={e => setFormPassword(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
-                </div>
-              </>
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Correo</label>
+                <input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
+              </div>
             )}
           </div>
         </main>
         <div className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto px-4 py-4 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent">
           <button onClick={() => handleSaveUser(isEdit)} disabled={formSaving}
-            className="w-full py-3.5 rounded-2xl font-bold text-base flex items-center justify-center gap-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/40 disabled:opacity-50 transition-all">
+            className="w-full py-3.5 rounded-2xl font-bold text-base flex items-center justify-center gap-2 bg-yellow-400 hover:bg-yellow-500 text-gray-900 shadow-lg shadow-yellow-400/40 disabled:opacity-50 transition-all">
             <Save size={20} />
-            {formSaving ? 'Guardando...' : 'Guardar Alumno'}
+            {formSaving ? 'Guardando...' : 'Guardar'}
           </button>
         </div>
       </div>
     );
   }
 
-  // ── Delete confirm ──
   if (view === 'delete-confirm' && deleteTarget) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center max-w-lg mx-auto px-4">
@@ -312,26 +294,25 @@ export default function TrainerDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col max-w-lg mx-auto">
-      {/* Brand watermark */}
       <div className="fixed inset-0 max-w-lg mx-auto flex items-center justify-center pointer-events-none z-0">
         <img src="/LogoActual.jpg" alt="" aria-hidden className="w-[45vw] max-w-[220px] select-none" style={{ opacity: 0.04, filter: 'grayscale(100%)' }} />
       </div>
       <header className="bg-gray-900 border-b border-gray-800 px-4 py-4 sticky top-0 z-10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-500/20 border-2 border-blue-500 shrink-0 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full overflow-hidden bg-yellow-400/20 border-2 border-yellow-400 shrink-0 flex items-center justify-center">
               {trainerProfile?.foto_url
-                ? <img src={trainerProfile.foto_url} alt="" className="w-full h-full object-cover" />
-                : <span className="text-sm font-bold text-blue-400 font-rajdhani">{initials}</span>}
+                ? <img src={trainerProfile.foto_url} alt="Trainer" className="w-full h-full object-cover" />
+                : <span className="text-sm font-bold text-yellow-400 font-rajdhani">{initials}</span>}
             </div>
             <div>
-              <p className="text-[10px] text-blue-400 font-semibold uppercase tracking-wider">Entrenador</p>
+              <p className="text-[10px] text-yellow-400 font-semibold uppercase tracking-wider">Entrenador</p>
               <h2 className="text-base font-bold text-white font-rajdhani leading-tight">{displayName || 'Entrenador'}</h2>
             </div>
           </div>
           <div className="flex items-center gap-1">
             <NotificationBell />
-            <button onClick={() => setEditingProfile(true)} className="text-gray-500 hover:text-blue-400 transition-colors p-1.5 rounded hover:bg-gray-800"><Edit3 size={16} /></button>
+            <button onClick={() => setEditingProfile(true)} className="text-gray-500 hover:text-yellow-400 transition-colors p-1.5 rounded hover:bg-gray-800"><Edit3 size={16} /></button>
             <button onClick={signOut} className="text-gray-500 hover:text-red-400 transition-colors p-1.5 rounded hover:bg-gray-800"><LogOut size={16} /></button>
           </div>
         </div>
@@ -355,12 +336,10 @@ export default function TrainerDashboard() {
               })}
             </div>
             <div className="text-center py-6">
-              <Shield size={40} className="mx-auto text-blue-400 mb-3" />
+              <Shield size={40} className="mx-auto text-yellow-400 mb-3" />
               <h2 className="text-xl font-bold text-white mb-1">Bienvenido, {displayName || 'Entrenador'}</h2>
               <p className="text-gray-500 text-sm">Selecciona una opcion del menu</p>
             </div>
-
-            <XpRankingWidget />
           </>
         )}
 
@@ -368,31 +347,26 @@ export default function TrainerDashboard() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-white font-rajdhani">Mis Alumnos</h2>
-              <button onClick={openAddUser} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
+              <button onClick={openAddUser} className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
                 <Plus size={14} /> Agregar
               </button>
             </div>
             {loadingData
               ? <div className="text-center py-8"><span className="w-8 h-8 spinner mx-auto" /></div>
-              : users.length === 0
-              ? (
-                <div className="text-center py-8 text-gray-400">
-                  <Users size={32} className="mx-auto mb-2 opacity-50" />
-                  <p className="mb-3">Aun no tienes alumnos</p>
-                  <button onClick={openAddUser} className="text-blue-400 text-sm font-semibold hover:text-blue-300">Agregar primer alumno</button>
-                </div>
-              )
+              : students.length === 0
+              ? <div className="text-center py-8 text-gray-400"><Users size={32} className="mx-auto mb-2 opacity-50" /><p>No tienes alumnos asignados</p></div>
               : (
                 <div className="space-y-2">
-                  {users.map(u => (
-                    <div key={u.id} className="bg-gray-800 rounded-xl p-3 flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-500/20 border border-blue-500 flex items-center justify-center shrink-0">
+                  {students.map(u => (
+                    <div key={u.id} className="bg-gray-800 rounded-xl p-3 flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center shrink-0 mt-0.5 bg-blue-500/20 border border-blue-500">
                         {u.foto_url
                           ? <img src={u.foto_url} alt="" className="w-full h-full object-cover" />
                           : <span className="text-[10px] font-bold text-blue-400">{u.nombre?.[0]}{u.apellido?.[0]}</span>}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-white truncate">{u.nombre} {u.apellido}</p>
+                        <p className="text-[10px] text-yellow-400/80 mb-0.5">{u.correo}</p>
                         <p className="text-[10px] text-gray-400">
                           {u.edad ? u.edad + ' anos' : ''}
                           {u.edad && u.estatura ? ' · ' : ''}
@@ -420,20 +394,20 @@ export default function TrainerDashboard() {
             <div className="relative mb-4">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar alumno..."
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
             </div>
             {loadingData
               ? <div className="text-center py-8"><span className="w-8 h-8 spinner mx-auto" /></div>
-              : filteredUsers.length === 0
+              : filteredStudents.length === 0
               ? (
                 <div className="text-center py-8 text-gray-400">
-                  {view === 'eval-select' ? <Activity size={32} className="mx-auto mb-2 opacity-50" /> : <Apple size={32} className="mx-auto mb-2 opacity-50" />}
-                  <p>No tienes alumnos aun</p>
+                  <Activity size={32} className="mx-auto mb-2 opacity-50" />
+                  <p>No hay alumnos</p>
                 </div>
               )
               : (
                 <div className="space-y-2">
-                  {filteredUsers.map(p => (
+                  {filteredStudents.map(p => (
                     <button key={p.id}
                       onClick={() => { setSelectedAlumno(p); setView(view === 'eval-select' ? 'eval-history' : 'dieta-select'); }}
                       className="w-full bg-gray-800 rounded-xl p-3 flex items-center gap-3 hover:bg-gray-700 transition-colors text-left">
@@ -457,6 +431,7 @@ export default function TrainerDashboard() {
           </div>
         )}
       </main>
+      <AIChatModal />
     </div>
   );
 }

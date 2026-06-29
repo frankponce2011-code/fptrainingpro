@@ -34,6 +34,16 @@ function OfflineBanner() {
 function AppInner() {
   const { session, profile, loading, initialized } = useAuth();
 
+  // ── DEBUG ──
+  console.log('[APP] initialized:', initialized, '| loading:', loading);
+  console.log('[APP] session:', session?.user?.email ?? 'null');
+  console.log('[APP] profile:', JSON.stringify({
+    id: profile?.id,
+    rol: profile?.rol,
+    nombre: profile?.nombre,
+    entrenador_id: profile?.entrenador_id,
+  }));
+
   if (!initialized || loading) {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#000000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
@@ -69,12 +79,23 @@ function AppInner() {
     );
   }
 
-  if (!session || !profile) return <LoginPage />;
+  if (!session) return <LoginPage />;
+
+  if (!profile) {
+    return (
+      <div className="flex items-center justify-center min-h-screen text-white bg-black">
+        Cargando perfil de usuario...
+      </div>
+    );
+  }
+
+  // ── DEBUG redirección ──
+  console.log('[APP] Redirigiendo según rol:', profile.rol);
 
   if (profile.rol === 'entrenador_administrador') return <AdminDashboard />;
   if (profile.rol === 'entrenador') return <TrainerDashboard />;
-  // alumno with no trainer = guest
   if (profile.rol === 'alumno' && !profile.entrenador_id) return <GuestDashboard />;
+
   return <StudentDashboard />;
 }
 

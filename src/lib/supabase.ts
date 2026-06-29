@@ -52,6 +52,7 @@ export type Evaluacion = {
   biceps_derecho_contraido: number | null;
   biceps_izquierdo: number | null;
   pliegue_triceps: number | null;
+  pliegue_biceps: number | null;
   pliegue_subescapular: number | null;
   pliegue_cresta_iliaca: number | null;
   pliegue_supraespinal: number | null;

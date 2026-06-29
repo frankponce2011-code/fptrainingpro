@@ -19,6 +19,8 @@ import AsignarRutina from './AsignarRutina';
 import IngresosPage from './IngresosPage';
 import XpRankingWidget from './XpRankingWidget';
 import FitnessContent from './FitnessContent';
+import NotificationBell from '../lib/NotificationBell';
+import AIChatModal from './AIChatModal';
 
 type View = 'home' | 'users' | 'trainers' | 'eval-select' | 'eval-history' |
   'dieta-select' |
@@ -48,7 +50,6 @@ export default function AdminDashboard() {
   const [formSexo, setFormSexo] = useState('masculino');
   const [formRol, setFormRol] = useState<'alumno' | 'entrenador'>('alumno');
   const [formEmail, setFormEmail] = useState('');
-  const [formPassword, setFormPassword] = useState('');
   const [formFoto, setFormFoto] = useState<File | null>(null);
   const [formFotoPreview, setFormFotoPreview] = useState<string | null>(null);
   const [formSaving, setFormSaving] = useState(false);
@@ -83,7 +84,6 @@ export default function AdminDashboard() {
     if (view === 'eval-select' || view === 'dieta-select') loadAllForSelect();
   }, [view]);
 
-  // ── Early returns after all hooks ──
   if (editingProfile) return <ProfileSetupPage isEditing onDone={() => { setEditingProfile(false); refreshProfile(); }} />;
   if (view === 'macros') return <MacroCalculator onClose={() => setView('home')} />;
   if (view === 'exercises') return <ExerciseLibrary onClose={() => setView('home')} />;
@@ -92,15 +92,16 @@ export default function AdminDashboard() {
   if (view === 'rutinas') return (
     <PlantillaList
       onBack={() => setView('home')}
-      onCreate={() => { setSelectedPlantilla(null); setView('rutinas-builder'); }}
+      onCreate={() => { setSelectedPlantilla(null); setView('home'); setTimeout(() => setView('rutinas-builder'), 0); }}
       onEdit={p => { setSelectedPlantilla(p); setView('rutinas-builder'); }}
     />
   );
   if (view === 'rutinas-builder') return (
     <PlantillaBuilder
+      key={selectedPlantilla?.id ?? 'new'}
       plantilla={selectedPlantilla}
       onBack={() => setView('rutinas')}
-      onSaved={p => { setSelectedPlantilla(p); }}
+      onSaved={p => { setSelectedPlantilla(p); setView('rutinas-builder'); }}
     />
   );
   if (view === 'assign-rutinas') return <AsignarRutina onBack={() => setView('home')} />;
@@ -146,7 +147,7 @@ export default function AdminDashboard() {
 
   function openAddUser(rol: 'alumno' | 'entrenador') {
     setFormNombre(''); setFormApellido(''); setFormEdad(''); setFormEstatura('');
-    setFormSexo('masculino'); setFormRol(rol); setFormEmail(''); setFormPassword('');
+    setFormSexo('masculino'); setFormRol(rol); setFormEmail('');
     setFormFoto(null); setFormFotoPreview(null); setFormError(''); setFormSuccess(false);
     setFormEntrenadorId('');
     setView('add-user');
@@ -158,7 +159,7 @@ export default function AdminDashboard() {
     setFormEstatura(p.estatura?.toString() || '');
     setFormSexo(p.sexo || 'masculino');
     setFormRol(p.rol as 'alumno' | 'entrenador');
-    setFormEmail(''); setFormPassword('');
+    setFormEmail('');
     setFormFoto(null); setFormFotoPreview(p.foto_url || null);
     setFormError(''); setFormSuccess(false);
     setFormEntrenadorId(p.entrenador_id || '');
@@ -170,9 +171,7 @@ export default function AdminDashboard() {
     setFormError(''); setFormSaving(true);
     try {
       if (!formNombre.trim() || !formApellido.trim()) throw new Error('Nombre y apellido son obligatorios');
-
       let foto_url = formFotoPreview || '';
-
       if (isEdit && selectedAlumno) {
         if (formFoto) foto_url = await uploadFoto(formFoto, selectedAlumno.id);
         const { error } = await supabase.from('perfiles').update({
@@ -184,10 +183,11 @@ export default function AdminDashboard() {
         }).eq('id', selectedAlumno.id);
         if (error) throw error;
       } else {
-        if (!formEmail.trim() || !formPassword) throw new Error('Correo y contrasena son obligatorios');
+        if (!formEmail.trim()) throw new Error('El correo electrónico es obligatorio');
+        const defaultPassword = 'Fp123456'; 
         const { error: createError } = await createUser({
           email: formEmail.trim(),
-          password: formPassword,
+          password: defaultPassword,
           nombre: formNombre.trim(),
           apellido: formApellido.trim(),
           edad: formEdad || undefined,
@@ -199,7 +199,6 @@ export default function AdminDashboard() {
         });
         if (createError) throw new Error(createError);
       }
-
       setFormSuccess(true);
       setTimeout(() => { setFormSuccess(false); setView(formRol === 'alumno' ? 'users' : 'trainers'); }, 800);
     } catch (err: unknown) {
@@ -227,7 +226,6 @@ export default function AdminDashboard() {
     { key: 'fitness', icon: Newspaper, label: 'Contenido Fitness', color: 'from-teal-600 to-teal-700' },
   ];
 
-  // ── Add/Edit Form ──
   if (view === 'add-user' || view === 'edit-user') {
     const isEdit = view === 'edit-user';
     return (
@@ -315,16 +313,10 @@ export default function AdminDashboard() {
               </div>
             )}
             {!isEdit && (
-              <>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Correo</label>
-                  <input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Contrasena</label>
-                  <input type="password" value={formPassword} onChange={e => setFormPassword(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
-                </div>
-              </>
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Correo</label>
+                <input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" />
+              </div>
             )}
           </div>
         </main>
@@ -339,7 +331,6 @@ export default function AdminDashboard() {
     );
   }
 
-  // ── Delete Confirm ──
   if (view === 'delete-confirm' && deleteTarget) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center max-w-lg mx-auto px-4">
@@ -362,7 +353,6 @@ export default function AdminDashboard() {
     );
   }
 
-  // ── Reassign Trainer Modal ──
   const ReassignModal = reassignTarget ? (
     <div className="fixed inset-0 bg-black/70 flex items-end justify-center z-50">
       <div className="bg-gray-900 border border-gray-800 rounded-t-2xl w-full max-w-lg p-5 pb-8">
@@ -397,7 +387,6 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col max-w-lg mx-auto">
       {ReassignModal}
-      {/* Brand watermark */}
       <div className="fixed inset-0 max-w-lg mx-auto flex items-center justify-center pointer-events-none z-0">
         <img src="/LogoActual.jpg" alt="" aria-hidden className="w-[45vw] max-w-[220px] select-none" style={{ opacity: 0.04, filter: 'grayscale(100%)' }} />
       </div>
@@ -415,6 +404,7 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <NotificationBell />
             <button onClick={() => setEditingProfile(true)} className="text-gray-500 hover:text-yellow-400 transition-colors p-1.5 rounded hover:bg-gray-800"><Edit3 size={16} /></button>
             <button onClick={signOut} className="text-gray-500 hover:text-red-400 transition-colors p-1.5 rounded hover:bg-gray-800"><LogOut size={16} /></button>
           </div>
@@ -443,69 +433,70 @@ export default function AdminDashboard() {
               <h2 className="text-xl font-bold text-white mb-1">Bienvenido, {displayName || 'Administrador'}</h2>
               <p className="text-gray-500 text-sm">Selecciona una opcion del menu</p>
             </div>
-
             <XpRankingWidget />
           </>
         )}
 
-        {view === 'users' && (
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-white font-rajdhani">Alumnos</h2>
-              <button onClick={() => openAddUser('alumno')} className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
-                <Plus size={14} /> Agregar
-              </button>
-            </div>
-            {loadingData
-              ? <div className="text-center py-8"><span className="w-8 h-8 spinner mx-auto" /></div>
-              : users.length === 0
-              ? <div className="text-center py-8 text-gray-400"><Users size={32} className="mx-auto mb-2 opacity-50" /><p>No hay alumnos registrados</p></div>
-              : (
-                <div className="space-y-2">
-                  {users.map(u => {
-                    const trainerName = getTrainerName(u.entrenador_id);
-                    return (
-                      <div key={u.id} className={`bg-gray-800 rounded-xl p-3 flex items-start gap-3 ${!u.entrenador_id ? 'border border-yellow-400/20' : ''}`}>
-                        <div className={`w-10 h-10 rounded-full overflow-hidden flex items-center justify-center shrink-0 mt-0.5 ${!u.entrenador_id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-blue-500/20 border border-blue-500'}`}>
-                          {u.foto_url
-                            ? <img src={u.foto_url} alt="" className="w-full h-full object-cover" />
-                            : <span className={`text-[10px] font-bold ${!u.entrenador_id ? 'text-yellow-400' : 'text-blue-400'}`}>{u.nombre?.[0]}{u.apellido?.[0]}</span>}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="text-sm font-semibold text-white truncate">{u.nombre} {u.apellido}</p>
-                            {!u.entrenador_id && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-400/15 text-yellow-400 border border-yellow-400/30 shrink-0">
-                                Invitado
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-gray-400">
-                            {u.edad ? u.edad + ' anos' : ''}
-                            {u.edad && u.estatura ? ' · ' : ''}
-                            {u.estatura ? u.estatura + ' cm' : ''}
-                          </p>
-                          <button onClick={() => setReassignTarget(u)}
-                            className={`mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors ${trainerName ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-gray-700 text-gray-500 hover:bg-gray-600'}`}>
-                            <UserCheck size={10} />
-                            {trainerName ? `Entrenador: ${trainerName}` : 'Sin entrenador asignado'}
-                            <ChevronDown size={9} />
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => openEditUser(u)} className="text-gray-500 hover:text-blue-400 p-1.5 rounded hover:bg-gray-700"><Edit3 size={16} /></button>
-                          <button onClick={() => toggleTrainerRole(u.id, u.rol)} className="text-gray-500 hover:text-cyan-400 p-1.5 rounded hover:bg-gray-700" title="Hacer entrenador"><ToggleRight size={16} /></button>
-                          <button onClick={() => { setDeleteTarget(u); setView('delete-confirm'); }} className="text-gray-500 hover:text-red-400 p-1.5 rounded hover:bg-gray-700"><Trash2 size={16} /></button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            <button onClick={() => setView('home')} className="mt-4 w-full px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-xl text-gray-300 text-sm font-semibold transition-colors">Volver al menu</button>
-          </div>
-        )}
+  {view === 'users' && (
+  <div>
+    <div className="flex items-center justify-between mb-4">
+      <h2 className="text-xl font-bold text-white font-rajdhani">Alumnos</h2>
+      <button onClick={() => openAddUser('alumno')} className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors">
+        <Plus size={14} /> Agregar
+      </button>
+    </div>
 
+    {/* Barra de búsqueda */}
+    <div className="relative mb-4">
+      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+      <input 
+        value={search} 
+        onChange={e => setSearch(e.target.value)} 
+        placeholder="Buscar alumno..."
+        className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-400" 
+      />
+    </div>
+
+    {loadingData ? (
+      <div className="text-center py-8"><span className="w-8 h-8 spinner mx-auto" /></div>
+    ) : users.filter(u => `${u.nombre} ${u.apellido}`.toLowerCase().includes(search.toLowerCase())).length === 0 ? (
+      <div className="text-center py-8 text-gray-400"><Users size={32} className="mx-auto mb-2 opacity-50" /><p>No hay alumnos registrados</p></div>
+    ) : (
+      <div className="space-y-2">
+        {users
+          .filter(u => `${u.nombre} ${u.apellido}`.toLowerCase().includes(search.toLowerCase()))
+          .map(u => {
+            const trainerName = getTrainerName(u.entrenador_id);
+            return (
+              <div key={u.id} className={`bg-gray-800 rounded-xl p-3 flex items-start gap-3 ${!u.entrenador_id ? 'border border-yellow-400/20' : ''}`}>
+                <div className={`w-10 h-10 rounded-full overflow-hidden flex items-center justify-center shrink-0 mt-0.5 ${!u.entrenador_id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-blue-500/20 border border-blue-500'}`}>
+                  {u.foto_url ? <img src={u.foto_url} alt="" className="w-full h-full object-cover" /> : <span className={`text-[10px] font-bold ${!u.entrenador_id ? 'text-yellow-400' : 'text-blue-400'}`}>{u.nombre?.[0]}{u.apellido?.[0]}</span>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm font-semibold text-white truncate">{u.nombre} {u.apellido}</p>
+                    
+                    {!u.entrenador_id && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-400/15 text-yellow-400 border border-yellow-400/30 shrink-0">Invitado</span>}
+                  </div>
+                  <p className="text-[10px] text-yellow-400/80 mb-0.5">{u.correo}</p>
+                  <p className="text-[10px] text-gray-400">{u.edad ? u.edad + ' anos' : ''}{u.edad && u.estatura ? ' · ' : ''}{u.estatura ? u.estatura + ' cm' : ''}</p>
+                  <button onClick={() => setReassignTarget(u)} className={`mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors ${trainerName ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-gray-700 text-gray-500 hover:bg-gray-600'}`}>
+                    <UserCheck size={10} /> {trainerName ? `Entrenador: ${trainerName}` : 'Sin entrenador asignado'} <ChevronDown size={9} />
+                  </button>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => openEditUser(u)} className="text-gray-500 hover:text-blue-400 p-1.5 rounded hover:bg-gray-700"><Edit3 size={16} /></button>
+                  <button onClick={() => toggleTrainerRole(u.id, u.rol)} className="text-gray-500 hover:text-cyan-400 p-1.5 rounded hover:bg-gray-700"><ToggleRight size={16} /></button>
+                  <button onClick={() => { setDeleteTarget(u); setView('delete-confirm'); }} className="text-gray-500 hover:text-red-400 p-1.5 rounded hover:bg-gray-700"><Trash2 size={16} /></button>
+                </div>
+              </div>
+            );
+          })}
+      </div>
+    )}
+    <button onClick={() => setView('home')} className="mt-4 w-full px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-xl text-gray-300 text-sm font-semibold transition-colors">Volver al menu</button>
+  </div>
+)}
         {view === 'trainers' && (
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -590,6 +581,7 @@ export default function AdminDashboard() {
           </div>
         )}
       </main>
+      <AIChatModal />
     </div>
   );
 }

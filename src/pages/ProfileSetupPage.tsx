@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { Camera, User, Save, AlertCircle, CheckCircle2, Dumbbell } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import CambiarPassword from './CambiarPassword';
 
 type Props = {
   isEditing?: boolean;
@@ -58,7 +59,7 @@ export default function ProfileSetupPage({ isEditing = false, onDone }: Props) {
         const ext = fotoFile.name.split('.').pop();
         const path = `${user.id}/avatar.${ext}`;
         const { error: uploadError } = await supabase.storage
-          .from('profile-photos')
+          .from('perfiles')
           .upload(path, fotoFile, { upsert: true });
 
         if (uploadError) {
@@ -67,7 +68,7 @@ export default function ProfileSetupPage({ isEditing = false, onDone }: Props) {
         }
 
         const { data: urlData } = supabase.storage
-          .from('profile-photos')
+          .from('perfiles')
           .getPublicUrl(path);
         foto_url = urlData.publicUrl + `?t=${Date.now()}`;
         console.log('[PROFILE] Foto subida correctamente');
@@ -297,6 +298,13 @@ export default function ProfileSetupPage({ isEditing = false, onDone }: Props) {
               </button>
             )}
           </form>
+
+          {/* Cambio de Contraseña (solo visible al editar perfil) */}
+          {isEditing && (
+            <div className="mt-6 pt-6 border-t border-gray-800">
+              <CambiarPassword />
+            </div>
+          )}
         </div>
       </div>
     </div>

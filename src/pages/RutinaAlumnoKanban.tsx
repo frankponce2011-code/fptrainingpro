@@ -61,8 +61,26 @@ function lsKey(rutinaId: string) {
   return `rutina_completados_${rutinaId}`;
 }
 
+function getWeekKey(): string {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(now.setDate(diff));
+  return monday.toISOString().split('T')[0];
+}
+
 function loadCompleted(rutinaId: string): Set<string> {
   try {
+    const lastResetKey = `rutina_reset_${rutinaId}`;
+    const lastReset = localStorage.getItem(lastResetKey);
+    const thisMonday = getWeekKey();
+
+    if (lastReset !== thisMonday) {
+      localStorage.removeItem(lsKey(rutinaId));
+      localStorage.setItem(lastResetKey, thisMonday);
+      return new Set();
+    }
+
     const raw = localStorage.getItem(lsKey(rutinaId));
     if (!raw) return new Set();
     return new Set(JSON.parse(raw) as string[]);
@@ -271,7 +289,7 @@ function EjCard({
         opacity: isActive ? 1 : 0.7,
       }}
     >
-      <div className="flex items-center gap-2">
+     <div className="flex items-center gap-2 min-w-0">
         {/* Checkbox */}
         <button
           onClick={e => { e.stopPropagation(); onToggle(); }}
@@ -293,7 +311,7 @@ function EjCard({
         </button>
 
         {/* Thumbnail + info */}
-        <div className="flex-1 flex items-center gap-2 min-w-0">
+       <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden w-0">
           {ej.ejercicio?.imagen_url ? (
             <ExerciseImg
             url={ej.ejercicio.imagen_url}
@@ -307,13 +325,14 @@ function EjCard({
               <Dumbbell size={12} className="text-gray-500" />
             </div>
           )}
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 overflow-hidden">
             <p
               className="text-xs font-bold truncate transition-colors"
               style={{
                 color: completed ? '#6b7280' : '#fff',
                 textDecoration: completed ? 'line-through' : 'none',
               }}
+              title={ej.ejercicio?.nombre}
             >
               {ej.ejercicio?.nombre}
             </p>
@@ -362,6 +381,31 @@ function EjCard({
 export default function RutinaAlumnoKanban({ rutina, onBack, onFirstXp }: Props) {
   const { user, profile, refreshProfile } = useAuth();
   const [dias, setDias] = useState<DiaConEj[]>([]);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+function handleSelectDia(diaId: string, index: number) {
+  if (detailEj) setDetailEj(null);
+  setSelectedDia(diaId);
+
+  requestAnimationFrame(() => {
+    const cardEl = cardRefs.current[index];
+    const container = containerRef.current;
+
+    if (cardEl && container) {
+      const containerWidth = container.offsetWidth;
+      const cardWidth = cardEl.offsetWidth;
+      const cardLeft = cardEl.offsetLeft;
+
+      const scrollPosition = cardLeft - (containerWidth / 2) + (cardWidth / 2);
+
+      container.scrollTo({
+        left: scrollPosition,
+        behavior: 'smooth'
+      });
+    }
+  });
+}
   const [loading, setLoading] = useState(true);
   const [selectedDia, setSelectedDia] = useState<string | null>(null);
   const [detailEj, setDetailEj] = useState<EjAlumno | null>(null);
@@ -526,6 +570,7 @@ export default function RutinaAlumnoKanban({ rutina, onBack, onFirstXp }: Props)
         ejercicioConfig={pej}
         onBack={() => setDetailEj(null)}
         showRegistro={true}
+        rutinaId={rutina.id}
         siblings={siblings}
         onSelectSibling={sib => {
           const src = activeDia?.ejercicios.find(e => e.id === sib.id);
@@ -553,14 +598,14 @@ export default function RutinaAlumnoKanban({ rutina, onBack, onFirstXp }: Props)
       {dias.length > 0 && (
         <div className="bg-gray-900 border-b border-gray-800 overflow-x-auto shrink-0">
           <div className="flex gap-1 px-3 py-2 min-w-max">
-            {dias.map(d => {
+            {dias.map((d, idx) => {
               const total = d.ejercicios.length;
               const done = d.ejercicios.filter(e => completed.has(e.id)).length;
               const allDone = total > 0 && done === total;
               return (
                 <button
                   key={d.id}
-                  onClick={() => setSelectedDia(d.id)}
+                  onClick={() => handleSelectDia(d.id, idx)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
                     selectedDia === d.id
                       ? allDone ? 'bg-green-500 text-white' : 'bg-yellow-400 text-gray-900'
@@ -588,9 +633,9 @@ export default function RutinaAlumnoKanban({ rutina, onBack, onFirstXp }: Props)
             <p className="text-xs text-gray-500">Esta rutina aun no tiene dias configurados</p>
           </div>
         ) : (
-          <div className="h-full overflow-x-auto">
+          <div className="h-full overflow-x-auto" ref={containerRef}>
             <div className="flex gap-3 px-3 py-3 h-full" style={{ minWidth: `${dias.length * 85}vw` }}>
-              {dias.map(dia => {
+             {dias.map((dia, idx) => {
                 const isActive = selectedDia === dia.id;
                 const grouped = groupEjercicios(dia.ejercicios);
                 const total = dia.ejercicios.length;
@@ -600,11 +645,12 @@ export default function RutinaAlumnoKanban({ rutina, onBack, onFirstXp }: Props)
 
                 return (
                   <div
-                    key={dia.id}
-                    className="shrink-0 flex flex-col"
-                    style={{ width: '82vw', maxWidth: '360px' }}
-                    onClick={() => setSelectedDia(dia.id)}
-                  >
+  key={dia.id}
+  ref={el => (cardRefs.current[idx] = el)}                  
+  className="shrink-0 flex flex-col"
+  style={{ width: '95vw', maxWidth: '100%' }}
+  onClick={() => handleSelectDia(dia.id, idx)}
+>
                     {/* Day header */}
                     <div className={`rounded-t-2xl px-4 pt-3 pb-2 ${isActive ? 'bg-yellow-400/10 border border-yellow-400/30 border-b-0' : 'bg-gray-800'}`}>
                       <div className="flex items-center justify-between mb-2">

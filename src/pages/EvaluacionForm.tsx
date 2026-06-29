@@ -39,6 +39,7 @@ const fieldGroups = [
     title: 'Pliegues Cutaneos',
     fields: [
       { key: 'pliegue_triceps', label: 'Pliegue Triceps (mm)' },
+      { key: 'pliegue_biceps', label: 'Pliegue Bíceps (mm)' },
       { key: 'pliegue_subescapular', label: 'Pliegue Subescapular (mm)' },
       { key: 'pliegue_cresta_iliaca', label: 'Pliegue Cresta Iliaca (mm)' },
       { key: 'pliegue_supraespinal', label: 'Pliegue Supraespinal (mm)' },
@@ -51,10 +52,35 @@ const fieldGroups = [
 
 type FormData = Record<string, string>;
 
-type FormulaGrasa = 'manual' | 'ross_kerr' | 'slaughter' | 'yuhasz';
+type FormulaGrasa = 'manual' | 'ross_kerr' | 'slaughter' | 'yuhasz' | 'durnin_womersley';
 
 function calcularGrasa(formula: FormulaGrasa, pliegues: Record<string, number | null>, sexo: string): number | null {
   const p = (key: string) => pliegues[key] ?? null;
+
+  if (formula === 'durnin_womersley') {
+  const b = p('pliegue_biceps');
+  const t = p('pliegue_triceps');
+  const s = p('pliegue_subescapular');
+  const c = p('pliegue_cresta_iliaca');
+  if (b === null || t === null || s === null || c === null) return null;
+
+  const suma = b + t + s + c;
+
+  // Constantes de ejemplo (17–29 años). Ajusta según tablas de edad/sexo.
+  let cte, mult;
+  if (sexo === 'femenino') {
+    cte = 1.1599;
+    mult = 0.0717;
+  } else {
+    cte = 1.1620;
+    mult = 0.0630;
+  }
+
+  const densidad = cte - mult * Math.log10(suma);
+  const porcentaje = (4.95 / densidad - 4.50) * 100;
+
+  return Math.round(porcentaje * 10) / 10;
+}
 
   if (formula === 'ross_kerr') {
     const vals = [p('pliegue_triceps'), p('pliegue_subescapular'), p('pliegue_cresta_iliaca'),
@@ -117,22 +143,35 @@ export default function EvaluacionForm({ alumno, evaluacion, onBack, onSaved }: 
   const [form, setForm] = useState<FormData>(initialData);
 
   // Auto-calculate fat % when formula or pliegues change
-  useEffect(() => {
-    if (formulaGrasa === 'manual') { setAutoCalculado(false); return; }
-    const pliegues: Record<string, number | null> = {};
-    ['pliegue_triceps', 'pliegue_subescapular', 'pliegue_cresta_iliaca',
-      'pliegue_supraespinal', 'pliegue_abdominal', 'pliegue_muslo', 'pliegue_pantorrilla'
-    ].forEach(k => {
-      pliegues[k] = form[k] !== '' ? parseFloat(form[k]) : null;
-    });
-    const resultado = calcularGrasa(formulaGrasa, pliegues, alumno.sexo || 'masculino');
-    if (resultado !== null) {
-      setPorcentajeGrasa(String(resultado));
-      setAutoCalculado(true);
-    } else {
-      setAutoCalculado(false);
-    }
-  }, [formulaGrasa, form]);
+ useEffect(() => {
+  if (formulaGrasa === 'manual') { 
+    setAutoCalculado(false); 
+    return; 
+  }
+
+  const pliegues: Record<string, number | null> = {};
+  [
+    'pliegue_triceps',
+    'pliegue_subescapular',
+    'pliegue_cresta_iliaca',
+    'pliegue_supraespinal',
+    'pliegue_abdominal',
+    'pliegue_muslo',
+    'pliegue_pantorrilla',
+    'pliegue_biceps'
+  ].forEach(k => {
+    pliegues[k] = form[k] !== '' ? parseFloat(form[k]) : null;
+  });
+
+  const resultado = calcularGrasa(formulaGrasa, pliegues, alumno.sexo ?? 'masculino');
+
+  if (resultado !== null) {
+    setPorcentajeGrasa(String(resultado));
+    setAutoCalculado(true);
+  } else {
+    setAutoCalculado(false);
+  }
+}, [formulaGrasa, form, alumno.sexo]);
 
   function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -321,6 +360,7 @@ export default function EvaluacionForm({ alumno, evaluacion, onBack, onSaved }: 
                 { value: 'ross_kerr', label: 'Ross y Kerr' },
                 { value: 'slaughter', label: 'Slaughter' },
                 { value: 'yuhasz', label: 'Yuhasz' },
+      { value: 'durnin_womersley', label: 'Durnin-Womersley' },
               ] as { value: FormulaGrasa; label: string }[]).map(opt => (
                 <button
                   key={opt.value}
@@ -341,6 +381,7 @@ export default function EvaluacionForm({ alumno, evaluacion, onBack, onSaved }: 
                 {formulaGrasa === 'ross_kerr' && 'Usa 7 pliegues: Triceps, Subescapular, Cresta Iliaca, Supraespinal, Abdominal, Muslo, Pantorrilla'}
                 {formulaGrasa === 'slaughter' && 'Usa 2 pliegues: Triceps + Subescapular'}
                 {formulaGrasa === 'yuhasz' && 'Usa 6 pliegues: Triceps, Subescapular, Cresta Iliaca, Abdominal, Muslo, Pantorrilla'}
+                {formulaGrasa === 'durnin_womersley' && 'Usa 4 pliegues: Bíceps, Triceps, Subescapular, Cresta Iliaca'}
               </p>
             )}
           </div>
@@ -367,7 +408,8 @@ export default function EvaluacionForm({ alumno, evaluacion, onBack, onSaved }: 
           {autoCalculado && (
             <p className="text-[10px] text-yellow-400 mt-1 text-right flex items-center justify-end gap-1">
               <Calculator size={10} />
-              Calculado con {formulaGrasa === 'ross_kerr' ? 'Ross y Kerr' : formulaGrasa === 'slaughter' ? 'Slaughter' : 'Yuhasz'}
+              Calculado con {formulaGrasa === 'ross_kerr' ? 'Ross y Kerr' : formulaGrasa === 'slaughter' ? 'Slaughter' : formulaGrasa === 'yuhasz' ? 'Yuhasz' : formulaGrasa === 'durnin_womersley' ? 'Durnin-Womersley' : 'Manual'
+                }
             </p>
           )}
         </div>

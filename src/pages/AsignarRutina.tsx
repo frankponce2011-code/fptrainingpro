@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import {
   ArrowLeft, Search, Dumbbell, CheckCircle2, ChevronRight, User, Calendar,
-  Trash2, Eye, Edit3, Plus,
+  Trash2, Eye, Plus,
 } from 'lucide-react';
 import { supabase, Profile, PlantillaRutina, RutinaAlumno } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import AlumnoRutinaEditor from './AlumnoRutinaEditor';
 
 type RutinaConFechaFin = RutinaAlumno & { fecha_fin: string | null; activa: boolean };
-import { useAuth } from '../contexts/AuthContext';
-import PlantillaBuilder from './PlantillaBuilder';
 
 type Props = {
   onBack: () => void;
@@ -34,15 +34,13 @@ export default function AsignarRutina({ onBack }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [search, setSearch] = useState('');
-  const [viewKanban, setViewKanban] = useState<PlantillaRutina | null>(null);
+  const [viewAlumnoRutina, setViewAlumnoRutina] = useState(false);
   const [success, setSuccess] = useState(false);
   const [editFechaFin, setEditFechaFin] = useState('');
   const [savingFechaFin, setSavingFechaFin] = useState(false);
   const [fechaFinSuccess, setFechaFinSuccess] = useState(false);
 
-  useEffect(() => {
-    loadAlumnos();
-  }, []);
+  useEffect(() => { loadAlumnos(); }, []);
 
   useEffect(() => {
     if (selectedAlumno?.rutina) {
@@ -59,7 +57,6 @@ export default function AsignarRutina({ onBack }: Props) {
     const { data: alumnosData } = await query;
     if (!alumnosData) { setAlumnos([]); setLoadingAlumnos(false); return; }
 
-    // Load each alumno's active rutina
     const { data: rutinasData } = await supabase
       .from('rutinas_alumno')
       .select('*')
@@ -92,12 +89,10 @@ export default function AsignarRutina({ onBack }: Props) {
     if (!selectedAlumno || !selectedPlantilla || !profile) return;
     setSaving(true);
 
-    // Hard-delete any existing rutina for this alumno (cascade removes dias + ejercicios)
     if (selectedAlumno.rutina) {
       await supabase.from('rutinas_alumno').delete().eq('id', selectedAlumno.rutina.id);
     }
 
-    // Insert new rutinas_alumno record
     const { data: rutinaData, error: rutinaError } = await supabase
       .from('rutinas_alumno')
       .insert({
@@ -113,7 +108,6 @@ export default function AsignarRutina({ onBack }: Props) {
 
     if (rutinaError || !rutinaData) { setSaving(false); return; }
 
-    // Copy dias + exercises
     const { data: diasData } = await supabase
       .from('plantilla_dias')
       .select('*, plantilla_ejercicios(*)')
@@ -154,7 +148,6 @@ export default function AsignarRutina({ onBack }: Props) {
     setSaving(false);
     setSuccess(true);
 
-    // Notify alumno
     await supabase.from('notifications').insert({
       user_id: selectedAlumno.id,
       title: 'Nueva rutina asignada',
@@ -198,18 +191,18 @@ export default function AsignarRutina({ onBack }: Props) {
     `${a.nombre} ${a.apellido}`.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Kanban view for alumno's current rutina (reuse PlantillaBuilder read-only)
-  if (viewKanban) {
+  if (viewAlumnoRutina && selectedAlumno?.rutina) {
     return (
-      <PlantillaBuilder
-        plantilla={viewKanban}
-        onBack={() => setViewKanban(null)}
-        onSaved={() => {}}
+      <AlumnoRutinaEditor
+        rutinaId={selectedAlumno.rutina.id}
+        rutinaNombre={selectedAlumno.rutina.nombre}
+        alumnoId={selectedAlumno.id}
+        alumnoNombre={`${selectedAlumno.nombre} ${selectedAlumno.apellido}`}
+        onBack={() => setViewAlumnoRutina(false)}
       />
     );
   }
 
-  // Delete confirmation overlay
   if (deleteConfirm && selectedAlumno) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center max-w-lg mx-auto px-6">
@@ -252,7 +245,6 @@ export default function AsignarRutina({ onBack }: Props) {
 
       <main className="flex-1 px-4 py-4 overflow-y-auto pb-8">
 
-        {/* Step: alumno list */}
         {step === 'list' && (
           <div>
             <div className="relative mb-4">
@@ -304,10 +296,8 @@ export default function AsignarRutina({ onBack }: Props) {
           </div>
         )}
 
-        {/* Step: alumno detail */}
         {step === 'alumno-detail' && selectedAlumno && (
           <div>
-            {/* Alumno header */}
             <div className="flex items-center gap-4 mb-5 bg-gray-800 rounded-2xl p-4">
               <div className="w-14 h-14 rounded-full overflow-hidden bg-yellow-400/10 border-2 border-yellow-400/40 flex items-center justify-center shrink-0">
                 {selectedAlumno.foto_url
@@ -326,7 +316,6 @@ export default function AsignarRutina({ onBack }: Props) {
               </div>
             )}
 
-            {/* Current rutina */}
             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Rutina activa</p>
             {selectedAlumno.rutina ? (
               <div className="bg-gray-800 rounded-2xl p-4 mb-4">
@@ -345,17 +334,12 @@ export default function AsignarRutina({ onBack }: Props) {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {selectedAlumno.rutina.plantilla_id && (
-                    <button
-                      onClick={() => {
-                        const p = plantillas.find(pl => pl.id === selectedAlumno.rutina?.plantilla_id);
-                        if (p) setViewKanban(p);
-                      }}
-                      className="flex items-center justify-center gap-1.5 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-xl text-xs font-semibold text-gray-300 transition-colors"
-                    >
-                      <Eye size={13} /> Ver Kanban
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setViewAlumnoRutina(true)}
+                    className="flex items-center justify-center gap-1.5 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-xl text-xs font-semibold text-gray-300 transition-colors"
+                  >
+                    <Eye size={13} /> Ver / Editar Rutina
+                  </button>
                   <button
                     onClick={() => setDeleteConfirm(true)}
                     className="flex items-center justify-center gap-1.5 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl text-xs font-semibold text-red-400 transition-colors"
@@ -364,7 +348,6 @@ export default function AsignarRutina({ onBack }: Props) {
                   </button>
                 </div>
 
-                {/* Fecha de vencimiento editable */}
                 <div className="mt-3 pt-3 border-t border-gray-700">
                   <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1">
                     <Calendar size={10} /> Valida hasta (opcional)
@@ -402,7 +385,6 @@ export default function AsignarRutina({ onBack }: Props) {
               </div>
             )}
 
-            {/* Assign rutina button */}
             <button
               onClick={() => setStep('select-plantilla')}
               className="w-full flex items-center justify-center gap-2 py-3.5 bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold rounded-2xl transition-colors"
@@ -413,7 +395,6 @@ export default function AsignarRutina({ onBack }: Props) {
           </div>
         )}
 
-        {/* Step: select plantilla */}
         {step === 'select-plantilla' && (
           <div>
             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Seleccionar plantilla</p>
@@ -454,7 +435,6 @@ export default function AsignarRutina({ onBack }: Props) {
         )}
       </main>
 
-      {/* Confirm assign button */}
       {step === 'select-plantilla' && selectedPlantilla && (
         <div className="sticky bottom-0 px-4 py-4 bg-gradient-to-t from-gray-950 to-transparent">
           <button
